@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chamber of Fates - D&D Virtual Tabletop</title>
+    <!-- Google Fonts: Cinzel & Lora สำหรับธีมแฟนตาซีโบราณ -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN for Layout & Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- PeerJS CDN for Serverless WebRTC Real-time P2P Sync -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        gold: '#d4af37',
+                        obsidian: '#111115',
+                        charcoal: '#1a1a22',
+                        parchment: '#f4ebd0',
+                        crimson: '#991b1b',
+                    },
+                    fontFamily: {
+                        cinzel: ['Cinzel', 'serif'],
+                        lora: ['Lora', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom Scrollbar for Chat & Logs */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111115;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3c3321;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #d4af37;
+        }
+        /* Custom fantasy grid styling */
+        .map-grid {
+            background-image: 
+                radial-gradient(rgba(212, 175, 55, 0.15) 1px, transparent 1px),
+                linear-gradient(to right, rgba(60, 51, 33, 0.2) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(60, 51, 33, 0.2) 1px, transparent 1px);
+            background-size: 24px 24px, 64px 64px, 64px 64px;
+        }
+        /* Token glow animations */
+        .token-player {
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+        }
+        .token-monster {
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+        }
+        .critical-glow {
+            animation: goldenGlow 1.5s infinite alternate;
+        }
+        @keyframes goldenGlow {
+            0% { box-shadow: 0 0 5px #d4af37; text-shadow: 0 0 5px #d4af37; }
+            100% { box-shadow: 0 0 25px #ffea79; text-shadow: 0 0 20px #ffea79; }
+        }
+    </style>
+</head>
+<body class="bg-obsidian text-parchment font-lora min-height-screen flex flex-col overflow-x-hidden">
+
+    <!-- Header Section -->
+    <header class="bg-charcoal border-b-2 border-[#3c3321] px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xl z-10">
+        <div class="flex items-center gap-3">
+            <i class="fa-solid fa-dice-d20 text-gold text-4xl animate-pulse"></i>
+            <div>
+                <h1 class="font-cinzel text-2xl font-bold tracking-wider text-gold">Chamber of Fates</h1>
+                <p class="text-xs text-gray-400 font-sans tracking-widest uppercase">Lite Web Virtual Tabletop</p>
+            </div>
+        </div>
+
+        <!-- Connection Panel (P2P Setup) -->
+        <div class="flex flex-wrap items-center gap-3 bg-black/40 p-2.5 rounded-lg border border-[#3c3321] font-sans text-sm">
+            <!-- Connection Status -->
+            <div id="connection-status" class="flex items-center gap-2 px-2 text-red-400">
+                <span class="h-2 w-2 rounded-full bg-red-500 animate-ping"></span>
+                <span>ยังไม่ได้เชื่อมต่อ</span>
+            </div>
+
+            <!-- Host Actions -->
+            <button id="btn-host" class="bg-gold/20 hover:bg-gold/30 border border-gold text-gold font-semibold py-1.5 px-3 rounded transition-all">
+                <i class="fa-solid fa-crown mr-1"></i> เป็น Host (สร้างห้อง)
+            </button>
+
+            <!-- Join Actions -->
+            <div class="flex items-center gap-1 border-l border-[#3c3321] pl-3">
+                <input type="text" id="join-id-input" placeholder="ใส่รหัส Room ID เพื่อน..." class="bg-charcoal border border-[#3c3321] text-parchment rounded px-2.5 py-1 w-44 focus:outline-none focus:border-gold">
+                <button id="btn-join" class="bg-crimson hover:bg-red-700 text-white font-semibold py-1.5 px-3 rounded transition-all">
+                    เข้าเล่นห้องเพื่อน
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main VTT Workspace -->
+    <main class="flex-grow grid grid-cols-1 xl:grid-cols-12 gap-4 p-4 max-w-7xl mx-auto w-full">
+        
+        <!-- Left Column: Controls & Shared Dice Roller -->
+        <div class="xl:col-span-3 flex flex-col gap-4">
+            
+            <!-- Player Status Profile -->
+            <div class="bg-charcoal border border-[#3c3321] p-4 rounded-xl shadow-lg">
+                <h3 class="font-cinzel text-gold border-b border-[#3c3321] pb-2 mb-3 text-lg"><i class="fa-solid fa-user-shield mr-2"></i> ข้อมูลผู้เล่นของคุณ</h3>
+                <div class="flex items-center gap-3">
+                    <div id="player-avatar" class="w-12 h-12 bg-gold/10 border border-gold rounded-full flex items-center justify-center text-gold text-xl font-cinzel">
+                        ?
+                    </div>
+                    <div>
+                        <input type="text" id="player-name-input" value="นักผจญภัยนิรนาม" class="bg-black/30 border border-[#3c3321] text-parchment rounded px-2 py-0.5 w-full font-semibold focus:outline-none focus:border-gold">
+                        <span class="text-xs text-gray-400">แก้ไขชื่อตัวละครของคุณด้านบนได้เลย</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Synced Dice Roller Panel -->
+            <div class="bg-charcoal border border-[#3c3321] p-4 rounded-xl shadow-lg flex-grow flex flex-col">
+                <h3 class="font-cinzel text-gold border-b border-[#3c3321] pb-2 mb-3 text-lg"><i class="fa-solid fa-dice mr-2"></i> ทอยเต๋าร่วมกัน</h3>
+                
+                <div class="grid grid-cols-3 gap-2.5 mb-4">
+                    <button onclick="triggerRoll(4)" class="bg-black/40 hover:bg-gold/20 border border-[#3c3321] hover:border-gold p-3 rounded-lg flex flex-col items-center gap-1 transition-all group">
+                        <span class="text-xs text-gray-400 group-hover:text-gold font-sans">d4</span>
+                        <i class="fa-solid fa-dice-d6 text-xl text-gray-300 group-hover:text-gold"></i>
+                    </button>
+                    <button onclick="triggerRoll(6)" class="bg-black/40 hover:bg-gold/20 border border-[#3c3321] hover:border-gold p-3 rounded-lg flex flex-col items-center gap-1 transition-all group">
+                        <span class="text-xs text-gray-400 group-hover:text-gold font-sans">d6</span>
+                        <i class="fa-solid fa-cube text-xl text-gray-300 group-hover:text-gold"></i>
+                    </button>
+                    <button onclick="triggerRoll(8)" class="bg-black/40 hover:bg-gold/20 border border-[#3c3321] hover:border-gold p-3 rounded-lg flex flex-col items-center gap-1 transition-all group">
+                        <span class="text-xs text-gray-400 group-hover:text-gold font-sans">d8</span>
+                        <i class="fa-solid fa-dice-d8 text-xl text-gray-300 group-hover:text-gold"></i>
+                    </button>
+                    <button onclick="triggerRoll(10)" class="bg-black/40 hover:bg-gold/20 border border-[#3c3321] hover:border-gold p-3 rounded-lg flex flex-col items-center gap-1 transition-all group">
+                        <span class="text-xs text-gray-400 group-hover:text-gold font-sans">d10</span>
+                        <i class="fa-solid fa-dice-d10 text-xl text-gray-300 group-hover:text-gold"></i>
+                    </button>
+                    <button onclick="triggerRoll(12)" class="bg-black/40 hover:bg-gold/20 border border-[#3c3321] hover:border-gold p-3 rounded-lg flex flex-col items-center gap-1 transition-all group">
+                        <span class="text-xs text-gray-400 group-hover:text-gold font-sans">d12</span>
+                        <i class="fa-solid fa-dice-d12 text-xl text-gray-300 group-hover:text-gold"></i>
+                    </button>
+                    <button onclick="triggerRoll(20)" class="bg-crimson/20 hover:bg-crimson/40 border border-crimson p-3 rounded-lg flex flex-col items-center gap-1 transition-all group">
+                        <span class="text-xs text-crimson group-hover:text-red-400 font-sans font-bold">d20</span>
+                        <i class="fa-solid fa-dice-d20 text-xl text-crimson group-hover:text-red-400"></i>
+                    </button>
+                </div>
+
+                <!-- Live Roll Result Box -->
+                <div id="roll-result-panel" class="bg-black/50 border-2 border-[#3c3321] rounded-xl p-4 text-center flex-grow flex flex-col justify-center items-center">
+                    <span id="txt-last-roll-type" class="text-xs text-gray-400 font-sans uppercase tracking-widest">รอกดทอยเต๋า...</span>
+                    <h2 id="txt-last-roll-result" class="text-5xl font-cinzel font-black my-2">-</h2>
+                    <span id="txt-last-roll-user" class="text-xs text-gold font-sans italic"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Column: Interactive Battlemap Grid (8x8) -->
+        <div class="xl:col-span-6 flex flex-col gap-4">
+            <div class="bg-charcoal border border-[#3c3321] p-4 rounded-xl shadow-lg flex flex-col items-center">
+                
+                <!-- Map Header & Token Add controls -->
+                <div class="w-full flex justify-between items-center border-b border-[#3c3321] pb-3 mb-4">
+                    <h2 class="font-cinzel text-gold text-lg"><i class="fa-solid fa-map-location-dot mr-2"></i> แผนที่สมรภูมิ (Battlemap)</h2>
+                    
+                    <!-- Token Spawner (Only if Host or connected) -->
+                    <div class="flex items-center gap-2">
+                        <button onclick="spawnToken('Player')" class="bg-blue-900/40 hover:bg-blue-800/60 border border-blue-500 text-blue-200 text-xs py-1 px-2.5 rounded font-sans transition-all">
+                            <i class="fa-solid fa-plus mr-1"></i> เพิ่มผู้เล่น (Blue)
+                        </button>
+                        <button onclick="spawnToken('Monster')" class="bg-red-950/40 hover:bg-red-900/60 border border-red-500 text-red-200 text-xs py-1 px-2.5 rounded font-sans transition-all">
+                            <i class="fa-solid fa-skull mr-1"></i> เพิ่มมอนสเตอร์ (Red)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- The Grid Game Board -->
+                <div class="relative bg-black/60 border-2 border-[#3c3321] rounded-lg p-1">
+                    <div id="battle-grid" class="grid grid-cols-8 grid-rows-8 gap-1 w-[32rem] h-[32rem] map-grid">
+                        <!-- Grid Tiles will be injected by JS -->
+                    </div>
+                </div>
+                
+                <p class="text-xs text-gray-400 mt-3 font-sans"><i class="fa-solid fa-circle-info mr-1"></i> วิธีเล่น: เพิ่มโทเคนการรบด้านบน แล้วลากย้ายโทเคนเหล่านั้นไปตามช่องตารางเพื่อจัดตำแหน่งรบกับเพื่อนได้เลย!</p>
+            </div>
+        </div>
+
+        <!-- Right Column: Game Chat & Actions Roll Log -->
+        <div class="xl:col-span-3 flex flex-col gap-4">
+            <div class="bg-charcoal border border-[#3c3321] p-4 rounded-xl shadow-lg h-full flex flex-col max-h-[600px] xl:max-h-full">
+                
+                <h3 class="font-cinzel text-gold border-b border-[#3c3321] pb-2 mb-3 text-lg flex justify-between items-center">
+                    <span><i class="fa-solid fa-scroll mr-2"></i> บันทึกเหตุการณ์ & แชท</span>
+                    <button id="btn-clear-logs" class="text-xs text-gray-500 hover:text-gold transition-colors font-sans font-normal"><i class="fa-solid fa-trash mr-1"></i> ล้าง</button>
+                </h3>
+
+                <!-- Scrollable Log Container -->
+                <div id="game-logs" class="flex-grow overflow-y-auto space-y-2 mb-3 p-2 bg-black/40 border border-[#3c3321] rounded-lg h-96 text-sm font-sans flex flex-col">
+                    <!-- Event logs and Chat Messages go here -->
+                    <div class="text-gray-500 italic text-xs">ยินดีต้อนรับสู่ Chamber of Fates VTT! กรุณาสถาปนาห้อง Host หรือใส่รหัสเพื่อนเพื่อเชื่อมต่อเล่นแบบออนไลน์</div>
+                </div>
+
+                <!-- Chat Input area -->
+                <div class="flex gap-1">
+                    <input type="text" id="chat-input" placeholder="พิมพ์คุยกับเพื่อนหรือเขียนคำสั่ง..." class="bg-black/60 border border-[#3c3321] text-parchment text-sm rounded px-3 py-2 flex-grow focus:outline-none focus:border-gold" onkeydown="if(event.key === 'Enter') sendChatMessage()">
+                    <button onclick="sendChatMessage()" class="bg-gold text-black font-semibold px-4 py-2 rounded hover:bg-[#ffea79] transition-all">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Room ID Overlay (Modal style, showing Room code for Host) -->
+    <div id="room-id-overlay" class="hidden fixed bottom-6 left-6 bg-charcoal border-2 border-gold p-4 rounded-xl shadow-2xl z-50 flex items-center gap-3 animate-bounce">
+        <div>
+            <span class="text-xs text-gray-400 block font-sans">รหัสห้อง (Room ID) ของคุณ:</span>
+            <strong id="display-room-id" class="text-gold font-cinzel text-lg tracking-wider">กำลังสร้างห้อง...</strong>
+        </div>
+        <button onclick="copyRoomID()" class="bg-black/40 border border-[#3c3321] hover:bg-gold/20 p-2 rounded text-parchment transition-all" title="คัดลอกรหัสห้อง">
+            <i class="fa-solid fa-copy"></i>
+        </button>
+    </div>
+
+    <!-- JavaScript logic: WebRTC Sync & Board Management -->
+    <script>
+        // Game State Variables
+        let peer = null;
+        let conn = null; // Client's active connection to host
+        let connections = []; // Host's active connections to all clients
+        let isHost = false;
+        let activeTokens = {}; // List of all tokens currently on grid {id: {name, type, color, x, y}}
+        
+        // DOM Elements
+        const btnHost = document.getElementById('btn-host');
+        const btnJoin = document.getElementById('btn-join');
+        const joinIdInput = document.getElementById('join-id-input');
+        const connectionStatus = document.getElementById('connection-status');
+        const overlayRoomID = document.getElementById('room-id-overlay');
+        const displayRoomId = document.getElementById('display-room-id');
+        const playerNameInput = document.getElementById('player-name-input');
+        const playerAvatar = document.getElementById('player-avatar');
+        const gameLogs = document.getElementById('game-logs');
+        const chatInput = document.getElementById('chat-input');
+        const btnClearLogs = document.getElementById('btn-clear-logs');
+        const battleGrid = document.getElementById('battle-grid');
+
+        // Automatically update Avatar initials when changing name
+        playerNameInput.addEventListener('input', () => {
+            const val = playerNameInput.value.trim() || '?';
+            playerAvatar.innerText = val.charAt(0).toUpperCase();
+        });
+
+        // ==================== 1. BOARD GRID INITIALIZATION ====================
+        function initGrid() {
+            battleGrid.innerHTML = '';
+            for (let y = 0; y < 8; y++) {
+                for (let x = 0; x < 8; x++) {
+                    const tile = document.createElement('div');
+                    tile.classList.add('border', 'border-gold/5', 'flex', 'items-center', 'justify-center', 'relative');
+                    tile.dataset.x = x;
+                    tile.dataset.y = y;
+                    
+                    // Drag over listener to allow dropping
+                    tile.addEventListener('dragover', (e) => e.preventDefault());
+                    tile.addEventListener('drop', handleDrop);
+                    
+                    battleGrid.appendChild(tile);
+                }
+            }
+        }
+        initGrid();
+
+        // ==================== 2. REAL-TIME REALM (PeerJS Sync) ====================
+        
+        // Update Status Display
+        function setStatus(text, colorClass, connected = false) {
+            connectionStatus.className = `flex items-center gap-2 px-2 ${colorClass}`;
+            connectionStatus.innerHTML = `
+                <span class="h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500 animate-ping'}"></span>
+                <span>${text}</span>
+            `;
+        }
+
+        // Host a Game
+        btnHost.addEventListener('click', () => {
+            if (peer) peer.destroy();
+            
+            // Initializing PeerJS
+            peer = new Peer();
+            setStatus('กำลังเชื่อมต่อเซิร์ฟเวอร์สำรอง...', 'text-yellow-400');
+
+            peer.on('open', (id) => {
+                isHost = true;
+                setStatus('เป็น Host (กำลังรอผู้เล่นอื่น...)', 'text-green-400', true);
+                displayRoomId.innerText = id;
+                overlayRoomID.classList.remove('hidden');
+                logEvent('SYSTEM', `สถาปนาห้องสำเร็จ! รหัสห้องของคุณคือ: ${id}`, 'text-gold font-semibold');
+            });
+
+            // When a client connects
+            peer.on('connection', (connection) => {
+                connections.push(connection);
+                logEvent('SYSTEM', `ผู้เล่นใหม่กำลังพยายามเชื่อมต่อเข้าร่วมวง...`, 'text-blue-300');
+                
+                connection.on('open', () => {
+                    logEvent('SYSTEM', `จับคู่เรียบร้อย! เชื่อมต่อสำเร็จ`, 'text-green-400');
+                    // Sync current map state to the newly joined player
+                    connection.send({
+                        type: 'SYNC_STATE',
+                        state: activeTokens,
+                        sender: 'HOST'
+                    });
+                });
+
+                connection.on('data', (data) => {
+                    handleIncomingData(data);
+                    // Broadcast data from one client to all other connected clients
+                    broadcast(data, connection);
+                });
+
+                connection.on('close', () => {
+                    connections = connections.filter(c => c !== connection);
+                    logEvent('SYSTEM', `ผู้เล่นออกจากปาร์ตี้ไปแล้ว`, 'text-red-400');
+                });
+            });
+        });
+
+        // Join a Game
+        btnJoin.addEventListener('click', () => {
+            const hostId = joinIdInput.value.trim();
+            if (!hostId) {
+                alert('กรุณากรอกรหัสห้อง Room ID ของเพื่อนก่อนครับ!');
+                return;
+            }
+
+            if (peer) peer.destroy();
+            peer = new Peer();
+            setStatus('กำลังประสานมิติเดินทาง...', 'text-yellow-400');
+
+            peer.on('open', (id) => {
+                isHost = false;
+                conn = peer.connect(hostId);
+                
+                conn.on('open', () => {
+                    setStatus('กำลังเล่นแบบผู้เล่นร่วมทีม', 'text-green-400', true);
+                    logEvent('SYSTEM', `เชื่อมโยงพิกัดห้องสำเร็จแล้ว! กำลังโหลดแผนที่การรบ...`, 'text-green-400');
+                });
+
+                conn.on('data', (data) => {
+                    handleIncomingData(data);
+                });
+
+                conn.on('close', () => {
+                    setStatus('ขาดการเชื่อมต่อจาก Host', 'text-red-400');
+                    logEvent('SYSTEM', `ตัดสัญญาณเชื่อมต่อกับห้องหลัก`, 'text-red-400');
+                    conn = null;
+                });
+            });
+        });
+
+        // Broadcast messages to all connected peers (Host exclusive)
+        function broadcast(data, excludeConn = null) {
+            connections.forEach(conn => {
+                if (conn !== excludeConn && conn.open) {
+                    conn.send(data);
+                }
+            });
+        }
+
+        // Send data (Automatically detects if Host or Client)
+        function sendPayload(data) {
+            if (isHost) {
+                broadcast(data);
+            } else if (conn && conn.open) {
+                conn.send(data);
+            }
+        }
+
+        // Handle Incoming Sync Packet data
+        function handleIncomingData(data) {
+            switch(data.type) {
+                case 'ROLL':
+                    showRollResult(data.dice, data.val, data.sender);
+                    break;
+                case 'CHAT':
+                    logEvent(data.sender, data.text, 'text-gray-200');
+                    break;
+                case 'ADD_TOKEN':
+                    renderToken(data.id, data.tokenData);
+                    break;
+                case 'MOVE_TOKEN':
+                    moveTokenElement(data.id, data.x, data.y);
+                    break;
+                case 'SYNC_STATE':
+                    activeTokens = data.state;
+                    rebuildTokens();
+                    logEvent('SYSTEM', `รับข้อมูลสถานะแผนที่สมบูรณ์!`, 'text-blue-300');
+                    break;
+            }
+        }
+
+        // Copy Room ID to Clipboard
+        function copyRoomID() {
+            const text = displayRoomId.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('คัดลอกรหัสห้องแล้ว! ส่งให้เพื่อนของคุณได้เลย');
+            });
+        }
+
+        // ==================== 3. CHAT LOGS AND GAME EVENTS ====================
+        function logEvent(sender, text, styleClass = '') {
+            const div = document.createElement('div');
+            div.className = `p-1 border-b border-[#3c3321]/20 flex flex-col`;
+            
+            // Create sender element
+            const senderSpan = document.createElement('span');
+            senderSpan.className = `text-xs font-semibold ${sender === 'SYSTEM' ? 'text-crimson' : 'text-gold'}`;
+            senderSpan.innerText = sender;
+            
+            // Create content text element
+            const textSpan = document.createElement('span');
+            textSpan.className = `${styleClass} mt-0.5 break-all`;
+            textSpan.innerText = text;
+
+            div.appendChild(senderSpan);
+            div.appendChild(textSpan);
+            gameLogs.appendChild(div);
+            gameLogs.scrollTop = gameLogs.scrollHeight;
+        }
+
+        function sendChatMessage() {
+            const text = chatInput.value.trim();
+            if (!text) return;
+            const sender = playerNameInput.value.trim() || 'นักผจญภัยนิรนาม';
+            
+            logEvent(sender, text, 'text-gray-200');
+            sendPayload({
+                type: 'CHAT',
+                sender: sender,
+                text: text
+            });
+            chatInput.value = '';
+        }
+
+        btnClearLogs.addEventListener('click', () => {
+            gameLogs.innerHTML = '<div class="text-gray-500 italic text-xs">ยินดีต้อนรับสู่ Chamber of Fates VTT!</div>';
+        });
+
+        // ==================== 4. DICE ROLL MECHANICS ====================
+        function triggerRoll(sides) {
+            const rollVal = Math.floor(Math.random() * sides) + 1;
+            const sender = playerNameInput.value.trim() || 'นักผจญภัยนิรนาม';
+
+            showRollResult(sides, rollVal, sender);
+            
+            // Broadcast roll
+            sendPayload({
+                type: 'ROLL',
+                dice: sides,
+                val: rollVal,
+                sender: sender
+            });
+        }
+
+        function showRollResult(sides, val, user) {
+            const lastRollType = document.getElementById('txt-last-roll-type');
+            const lastRollResult = document.getElementById('txt-last-roll-result');
+            const lastRollUser = document.getElementById('txt-last-roll-user');
+            const rollPanel = document.getElementById('roll-result-panel');
+
+            lastRollType.innerText = `ทอยลูกเต๋า d${sides}`;
+            lastRollResult.innerText = val;
+            lastRollUser.innerText = `โดย ${user}`;
+
+            // Critical 20 Glow effect
+            if (sides === 20) {
+                if (val === 20) {
+                    rollPanel.className = "bg-black/50 border-2 border-gold rounded-xl p-4 text-center flex-grow flex flex-col justify-center items-center critical-glow";
+                    lastRollResult.className = "text-5xl font-cinzel font-black my-2 text-gold";
+                    logEvent('CRITICAL', `${user} ทอยได้ NATURAL 20! 🎉`, 'text-yellow-300 font-bold tracking-widest uppercase');
+                } else if (val === 1) {
+                    rollPanel.className = "bg-black/50 border-2 border-red-800 rounded-xl p-4 text-center flex-grow flex flex-col justify-center items-center";
+                    lastRollResult.className = "text-5xl font-cinzel font-black my-2 text-red-500";
+                    logEvent('FUMBLE', `${user} ทอยได้ 1... เกิดความผิดพลาดรุนแรง! 💀`, 'text-red-500 font-bold');
+                } else {
+                    rollPanel.className = "bg-black/50 border-2 border-[#3c3321] rounded-xl p-4 text-center flex-grow flex flex-col justify-center items-center";
+                    lastRollResult.className = "text-5xl font-cinzel font-black my-2 text-parchment";
+                    logEvent(user, `ทอย d20 ได้แต้ม ${val}`, 'text-gray-300 italic');
+                }
+            } else {
+                rollPanel.className = "bg-black/50 border-2 border-[#3c3321] rounded-xl p-4 text-center flex-grow flex flex-col justify-center items-center";
+                lastRollResult.className = "text-5xl font-cinzel font-black my-2 text-parchment";
+                logEvent(user, `ทอย d${sides} ได้แต้ม ${val}`, 'text-gray-300 italic');
+            }
+        }
+
+        // ==================== 5. BATTLEMAP TOKENS & DRAG-AND-DROP ====================
+        
+        // Spawn Token
+        function spawnToken(tokenType) {
+            const id = 'token_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+            const sender = playerNameInput.value.trim() || 'นักผจญภัยนิรนาม';
+            const tokenName = tokenType === 'Player' ? `${sender.substring(0, 4)}` : 'มอนสเตอร์';
+            const color = tokenType === 'Player' ? 'bg-blue-600 border-blue-400' : 'bg-red-700 border-red-500';
+
+            const tokenData = {
+                name: tokenName,
+                type: tokenType,
+                color: color,
+                x: 0,
+                y: 0
+            };
+
+            activeTokens[id] = tokenData;
+            renderToken(id, tokenData);
+
+            // Broadcast newly created token
+            sendPayload({
+                type: 'ADD_TOKEN',
+                id: id,
+                tokenData: tokenData
+            });
+
+            logEvent('SYSTEM', `เพิ่มโทเคน "${tokenName}" ลงบนกระดานแล้ว`, 'text-blue-300');
+        }
+
+        // Render Token inside the DOM grid
+        function renderToken(id, tokenData) {
+            // Remove existing token in case of updates
+            const oldToken = document.getElementById(id);
+            if (oldToken) oldToken.remove();
+
+            const tokenEl = document.createElement('div');
+            tokenEl.id = id;
+            tokenEl.className = `${tokenData.color} border-2 rounded-full w-12 h-12 flex items-center justify-center cursor-move z-10 select-none text-white font-cinzel text-xs font-bold font-sans ${tokenData.type === 'Player' ? 'token-player' : 'token-monster'}`;
+            tokenEl.innerText = tokenData.name;
+            
+            // Make Draggable
+            tokenEl.setAttribute('draggable', 'true');
+            tokenEl.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', id);
+            });
+
+            // Put it inside appropriate cell
+            const targetCell = getCell(tokenData.x, tokenData.y);
+            if (targetCell) {
+                targetCell.appendChild(tokenEl);
+            }
+        }
+
+        // Get Cell DOM Element via x,y coordinate
+        function getCell(x, y) {
+            return document.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+        }
+
+        // Handle dropping token to a new cell
+        function handleDrop(e) {
+            e.preventDefault();
+            const id = e.dataTransfer.getData('text/plain');
+            const tokenEl = document.getElementById(id);
+            if (!tokenEl) return;
+
+            const targetCell = e.currentTarget;
+            const newX = parseInt(targetCell.dataset.x);
+            const newY = parseInt(targetCell.dataset.y);
+
+            // Update local memory state
+            if (activeTokens[id]) {
+                activeTokens[id].x = newX;
+                activeTokens[id].y = newY;
+                
+                // Append inside DOM
+                targetCell.appendChild(tokenEl);
+
+                // Broadcast move to other peers
+                sendPayload({
+                    type: 'MOVE_TOKEN',
+                    id: id,
+                    x: newX,
+                    y: newY
+                });
+
+                logEvent('MAP', `ย้าย "${activeTokens[id].name}" ไปพิกัด [${newX + 1}, ${newY + 1}]`, 'text-gray-400 text-xs italic');
+            }
+        }
+
+        // Move token element internally upon syncing
+        function moveTokenElement(id, x, y) {
+            const tokenEl = document.getElementById(id);
+            const targetCell = getCell(x, y);
+            if (tokenEl && targetCell) {
+                targetCell.appendChild(tokenEl);
+                if (activeTokens[id]) {
+                    activeTokens[id].x = x;
+                    activeTokens[id].y = y;
+                    logEvent('MAP', `เพื่อนย้าย "${activeTokens[id].name}" ไปพิกัด [${x + 1}, ${y + 1}]`, 'text-gray-400 text-xs italic');
+                }
+            }
+        }
+
+        // Rebuild all tokens on incoming full Sync state from Host
+        function rebuildTokens() {
+            // Clear all tokens from grid first
+            document.querySelectorAll('[id^="token_"]').forEach(el => el.remove());
+
+            // Build again
+            for (const id in activeTokens) {
+                renderToken(id, activeTokens[id]);
+            }
+        }
+    </script>
+</body>
+</html>
