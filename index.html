@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D Grand Sovereign VTT - Ultimate Engine v5.0</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Firebase SDKs compat -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Kanit:wght@300;400;500;700&display=swap');
+        body { font-family: 'Kanit', sans-serif; background-color: #050507; color: #f3f4f6; }
+        .font-fantasy { font-family: 'Cinzel', serif; }
+        .grid-cell { aspect-ratio: 1; transition: all 0.15s ease; position: relative; border: 1px solid rgba(212, 175, 55, 0.08); }
+        .grid-cell:hover { background-color: rgba(212, 175, 55, 0.04); }
+        .token { transition: transform 0.2s ease, box-shadow 0.2s ease; top: 2px; left: 2px; }
+        .token:active { transform: scale(1.1); cursor: grabbing; }
+        .fog-hidden { background-color: rgba(0,0,0,0.96) !important; border: 1px dashed #4b5563; z-index: 5; }
+        .turn-active { box-shadow: 0 0 14px #fbbf24, inset 0 0 8px #fbbf24 !important; border-color: #fbbf24 !important; animation: pulseGlow 1.5s infinite; }
+        @keyframes pulseGlow { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+        .crit-glow { animation: critAnim 0.8s ease-in-out infinite alternate; text-shadow: 0 0 10px #f59e0b, 0 0 20px #ef4444; color: #fef08a !important; }
+        @keyframes critAnim { from { transform: scale(1); } to { transform: scale(1.15); } }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: #0c0c10; }
+        ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #d4af37; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden select-none">
+
+    <!-- IN-APP TOAST NOTIFICATION CONTAINER -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- TOP CONTROL HEADER -->
+    <header class="bg-gray-950 border-b border-amber-950 px-6 py-2 flex justify-between items-center shrink-0 shadow-lg z-10">
+        <div class="flex items-center space-x-3">
+            <span class="text-xl animate-pulse">🐉</span>
+            <h1 class="text-sm font-fantasy font-bold tracking-widest text-amber-500 flex items-center gap-1.5">
+                GRAND SOVEREIGN VTT <span class="text-[9px] bg-red-950 text-red-400 border border-red-900/60 px-1.5 py-0.5 rounded font-mono font-bold">v5.0 ULTIMATE</span>
+            </h1>
+        </div>
+        
+        <!-- INITIATIVE TRACKER BAR -->
+        <div id="initiative-bar" class="flex-1 max-w-lg mx-6 bg-gray-900/70 border border-gray-800 rounded-lg p-1 px-3 flex items-center gap-2 overflow-x-auto text-[11px]">
+            <span class="text-amber-400 font-bold shrink-0"><i class="fa-solid fa-clock mr-1"></i> ลำดับคิว:</span>
+            <div id="initiative-list" class="flex items-center gap-1.5 flex-1 overflow-x-auto">
+                <span class="text-gray-500 italic text-[10px]">ยังไม่มีสถานะการต่อสู้ในปัจจุบัน...</span>
+            </div>
+            <button id="btn-next-turn" onclick="nextTurn()" class="hidden bg-amber-600 hover:bg-amber-700 text-black font-bold px-2 py-0.5 rounded text-[10px] shrink-0 transition">ถัดไป ➡️</button>
+        </div>
+        
+        <div class="flex items-center space-x-3">
+            <div class="flex items-center bg-gray-900 border border-gray-800 rounded-lg p-1 px-2 space-x-2">
+                <input type="text" id="user-display-name" onchange="updateProfileName(this.value)" class="bg-black text-xs text-white border-b border-gray-700 focus:outline-none font-bold px-1 w-24 rounded" value="จอมเวทย์">
+                <input type="color" id="user-color" onchange="updateProfileColor(this.value)" value="#3b82f6" class="w-4 h-4 bg-transparent border-0 cursor-pointer">
+            </div>
+            <div id="connection-status" class="flex items-center space-x-1 text-[11px] bg-gray-900 px-2 py-1 rounded-lg border border-gray-800">
+                <span class="w-1.5 h-1.5 rounded-full bg-yellow-500" id="status-dot"></span>
+                <span id="status-text" class="text-gray-400">คลาวด์แสตนด์บาย</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN INTERACTIVE WORKSPACE -->
+    <main class="flex-1 flex overflow-hidden">
+        
+        <!-- LEFT CONTROL PANEL (TABBED NAVIGATION) -->
+        <section class="w-[420px] bg-gray-900/40 border-r border-gray-800 flex flex-col shrink-0 overflow-hidden">
+            
+            <!-- TAB BAR -->
+            <div class="grid grid-cols-5 border-b border-gray-800 bg-gray-950 text-[10px] font-bold shrink-0">
+                <button onclick="switchTab('character')" id="tab-btn-character" class="py-2.5 text-amber-500 border-b-2 border-amber-500 bg-gray-900/40 flex flex-col items-center gap-1"><i class="fa-solid fa-user"></i> ตัวละคร</button>
+                <button onclick="switchTab('combat')" id="tab-btn-combat" class="py-2.5 text-gray-400 hover:text-white flex flex-col items-center gap-1"><i class="fa-solid fa-shield-halved"></i> ต่อสู้</button>
+                <button onclick="switchTab('campaign')" id="tab-btn-campaign" class="py-2.5 text-gray-400 hover:text-white flex flex-col items-center gap-1"><i class="fa-solid fa-book-open"></i> แคมเปญ</button>
+                <button onclick="switchTab('magic')" id="tab-btn-magic" class="py-2.5 text-gray-400 hover:text-white flex flex-col items-center gap-1"><i class="fa-solid fa-wand-sparkles"></i> เวทมนตร์</button>
+                <button onclick="switchTab('database')" id="tab-btn-database" class="py-2.5 text-gray-400 hover:text-white flex flex-col items-center gap-1 text-amber-500"><i class="fa-solid fa-database"></i> คลัง & AI</button>
+            </div>
+
+            <!-- TABS WRAPPER -->
+            <div class="flex-1 overflow-y-auto p-3 space-y-3">
+                
+                <!-- MULTIPLAYER CONTROLLER -->
+                <div class="bg-gray-950 p-2 rounded-lg border border-gray-800 flex justify-between items-center text-[10px]">
+                    <div class="flex gap-1 items-center">
+                        <button id="btn-host" class="bg-amber-950 border border-amber-800 text-amber-200 px-2 py-1 rounded font-bold hover:bg-amber-900 transition">Host ห้อง (DM)</button>
+                        <input type="text" id="input-room-id" placeholder="รหัสห้อง" class="w-16 bg-black border border-gray-800 text-white font-mono text-center rounded px-1 py-0.5" />
+                        <button id="btn-join" class="bg-blue-600 text-white px-2 py-1 rounded font-bold hover:bg-blue-700 transition">จอย</button>
+                    </div>
+                    <button id="btn-share-room" onclick="copyRoomID()" class="hidden text-amber-400 hover:text-amber-300 font-mono text-[10px]"><i class="fa-solid fa-copy mr-1"></i> คัดลอก ID: <span id="share-room-id">ROOM-XXXX</span></button>
+                </div>
+
+                <!-- ================= TAB 1: CHARACTER SYSTEM & INVENTORY ================= -->
+                <div id="tab-panel-character" class="space-y-3">
+                    <div class="bg-gray-950 p-3 rounded-xl border border-gray-800/80 space-y-2 text-[11px]">
+                        <h3 class="font-fantasy text-amber-500 border-b border-gray-800 pb-1 flex justify-between items-center text-xs">
+                            <span>👥 แผงตัวละครและสเตตัส</span>
+                            <span id="char-level" class="bg-amber-950 text-amber-400 px-1.5 py-0.5 rounded font-mono font-bold">LV. 1</span>
+                        </h3>
+                        <div class="grid grid-cols-2 gap-1.5">
+                            <div>
+                                <span class="text-gray-500 text-[10px]">เผ่า (Race):</span>
+                                <select id="char-race" class="w-full bg-gray-900 border border-gray-700 rounded text-white p-1">
+                                    <option value="Human">Human 🧑</option> <option value="Elf">Elf 🧝</option>
+                                    <option value="Dwarf">Dwarf 🎅</option> <option value="Halfling">Halfling 👶</option>
+                                </select>
+                            </div>
+                            <div>
+                                <span class="text-gray-500 text-[10px]">คลาส (Class):</span>
+                                <select id="char-class" class="w-full bg-gray-900 border border-gray-700 rounded text-white p-1">
+                                    <option value="Fighter">Fighter ⚔️</option> <option value="Wizard">Wizard 🔮</option>
+                                    <option value="Rogue">Rogue 🗡️</option> <option value="Cleric">Cleric ☀️</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- ABILITY SCORES -->
+                        <div class="grid grid-cols-6 gap-1 text-center font-mono text-[9px] pt-1">
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block font-bold">STR</span><input id="score-str" type="number" value="10" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block font-bold">DEX</span><input id="score-dex" type="number" value="10" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block font-bold">CON</span><input id="score-con" type="number" value="10" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block font-bold">INT</span><input id="score-int" type="number" value="10" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block font-bold">WIS</span><input id="score-wis" type="number" value="10" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block font-bold">CHA</span><input id="score-cha" type="number" value="10" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                        </div>
+
+                        <!-- HP, AC & INITIATIVE BONUS -->
+                        <div class="grid grid-cols-3 gap-1.5 text-center pt-1">
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block text-[9px]">Max HP</span><input id="char-max-hp" type="number" value="30" class="w-full bg-black text-center text-white text-xs rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block text-[9px]">Armor Class</span><input id="char-ac" type="number" value="15" class="w-full bg-black text-center text-white text-xs rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded"><span class="text-gray-400 block text-[9px]">Init Bonus</span><input id="char-init-bonus" type="number" value="2" class="w-full bg-black text-center text-white text-xs rounded font-bold"></div>
+                        </div>
+
+                        <!-- INVENTORY & CURRENCY -->
+                        <div class="border-t border-gray-800 pt-2 space-y-1.5">
+                            <span class="font-bold text-gray-300 block"><i class="fa-solid fa-briefcase"></i> ระบบกระเป๋าและเงินตรา (Inventory)</span>
+                            <div class="grid grid-cols-3 gap-1 text-center font-mono text-[9px]">
+                                <div class="bg-amber-950/20 p-1 rounded border border-amber-900/40 text-amber-400"><span>Gold 🪙</span><input id="coin-gold" type="number" value="50" onchange="calculateTotalWeight()" class="w-full bg-black text-center text-white rounded"></div>
+                                <div class="bg-gray-900/40 p-1 rounded border border-gray-800 text-gray-300"><span>Silver 🪙</span><input id="coin-silver" type="number" value="100" onchange="calculateTotalWeight()" class="w-full bg-black text-center text-white rounded"></div>
+                                <div class="bg-orange-950/20 p-1 rounded border border-orange-900/40 text-orange-400"><span>Copper 🪙</span><input id="coin-copper" type="number" value="20" onchange="calculateTotalWeight()" class="w-full bg-black text-center text-white rounded"></div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <textarea id="char-inventory" rows="2" class="flex-1 bg-gray-900 border border-gray-800 rounded p-1 text-[11px] focus:outline-none" placeholder="อุปกรณ์สวมใส่: ดาบยาว, คบเพลิง..."></textarea>
+                                <div class="text-center font-mono text-[9px] bg-gray-900 p-1.5 rounded shrink-0">
+                                    <span class="text-gray-500">น้ำหนักรวม (lb)</span>
+                                    <input id="char-weight" type="number" value="12.5" readonly class="w-12 bg-black text-center text-amber-500 rounded font-bold block mt-1">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ACTIONS -->
+                        <div class="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-gray-800">
+                            <button onclick="summonCharacterToken()" class="bg-amber-600 hover:bg-amber-700 text-black font-bold py-1 rounded">เสกหมากลงสนาม</button>
+                            <button onclick="levelUpCharacter()" class="bg-gray-800 hover:bg-gray-700 text-gray-200 font-bold py-1 rounded">อัปเลเวลตัวละคร 🌟</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= TAB 2: COMBAT ENGINE ================= -->
+                <div id="tab-panel-combat" class="hidden space-y-3">
+                    <div class="bg-gray-950 p-3 rounded-xl border border-gray-800/80 space-y-2.5 text-[11px]">
+                        <h3 class="font-bold text-amber-500 border-b border-gray-800 pb-1 flex justify-between items-center">
+                            <span>⚔️ ระบบต่อสู้และการจัดการ HP</span>
+                            <span class="text-[9px] bg-red-950 text-red-400 px-1 rounded font-mono">COMBAT PANEL</span>
+                        </h3>
+                        
+                        <!-- DAMAGE / HEAL CALCULATOR -->
+                        <div class="bg-gray-900/80 p-2.5 rounded border border-gray-800 space-y-1.5">
+                            <span class="font-semibold text-gray-400 block text-[10px]">แก้ไขพลังชีวิตหมากที่คลิกเลือกไว้บนแผนที่:</span>
+                            <div class="flex gap-1.5">
+                                <input id="combat-calc-amount" type="number" value="10" class="w-16 bg-black border border-gray-800 text-white text-center rounded text-xs font-bold font-mono" />
+                                <button onclick="applyCombatCalc('deal-dmg')" class="flex-1 bg-red-950/40 hover:bg-red-900 border border-red-800 text-red-200 py-1 rounded text-[10px] font-bold">โจมตีดาเมจ</button>
+                                <button onclick="applyCombatCalc('heal')" class="flex-1 bg-green-950/40 hover:bg-green-900 border border-green-800 text-green-200 py-1 rounded text-[10px] font-bold">ฮีลฟื้นฟูพลัง</button>
+                            </div>
+                        </div>
+
+                        <!-- DEBUFF TRACKER -->
+                        <div>
+                            <span class="font-semibold text-gray-400 block mb-1 text-[10px]">ใส่/ถอดสถานะผิดปกติให้ Token:</span>
+                            <div class="grid grid-cols-3 gap-1 text-center text-[9px] font-bold">
+                                <button onclick="toggleDebuffOnToken('Poisoned 🧪')" class="bg-gray-900 hover:bg-purple-900 py-1 border border-gray-850 rounded text-gray-300">Poisoned 🧪</button>
+                                <button onclick="toggleDebuffOnToken('Stunned 🌀')" class="bg-gray-900 hover:bg-purple-900 py-1 border border-gray-850 rounded text-gray-300">Stunned 🌀</button>
+                                <button onclick="toggleDebuffOnToken('Charmed ❤️')" class="bg-gray-900 hover:bg-purple-900 py-1 border border-gray-850 rounded text-gray-300">Charmed ❤️</button>
+                            </div>
+                        </div>
+
+                        <!-- ENCOUNTER BUILDER (DM ONLY) -->
+                        <div id="dm-encounter-panel" class="border-t border-gray-800 pt-2 space-y-2 hidden">
+                            <span class="font-bold text-red-400 block"><i class="fa-solid fa-spider"></i> จำลองสถานการณ์ปีศาจ (Encounter Builder)</span>
+                            <div class="grid grid-cols-2 gap-1 text-center text-[10px]">
+                                <button onclick="summonMonsterPreset('Goblin 👹', 12, 12)" class="bg-gray-900 hover:bg-red-900 border border-gray-800 py-1 rounded font-medium">เสกก็อบลิน (HP:12)</button>
+                                <button onclick="summonMonsterPreset('Red Dragon 🐉', 150, 19)" class="bg-gray-900 hover:bg-red-900 border border-gray-800 py-1 rounded font-medium">เสกมังกร (HP:150)</button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1 text-center text-[10px]">
+                                <button onclick="rollAllInitiatives()" class="bg-amber-600 hover:bg-amber-700 text-black font-bold py-1.5 rounded">ทอยคิว Initiative ทั้งหมด</button>
+                                <button onclick="clearEncounterBoard()" class="bg-gray-800 hover:bg-gray-700 text-gray-200 py-1.5 rounded">ล้างบอร์ดหมากทั้งหมด</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= TAB 3: CAMPAIGN SYSTEM ================= -->
+                <div id="tab-panel-campaign" class="hidden space-y-3">
+                    <div class="bg-gray-950 p-3 rounded-xl border border-gray-800/80 space-y-2 text-[11px]">
+                        <h3 class="font-bold text-amber-500 border-b border-gray-800 pb-1 flex justify-between items-center text-xs">
+                            <span>📖 บันทึกการเดินทางและเควสต์ (Campaign)</span>
+                        </h3>
+                        <div>
+                            <span class="text-gray-500 block mb-0.5 text-[10px]">ภารกิจของปาร์ตี้ (Quest Log):</span>
+                            <textarea id="campaign-quests" rows="2" class="w-full bg-gray-900 border border-gray-800 text-white rounded p-1.5 focus:outline-none" placeholder="- ปราบก็อบลินท้ายป่าใหญ่&#10;- นำอัญมณีกลับคืนสู่หมู่บ้าน..."></textarea>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block mb-0.5 text-[10px]">ไดอารี่การผจญภัย (Journal):</span>
+                            <textarea id="campaign-journal" rows="2" class="w-full bg-gray-900 border border-gray-800 text-white rounded p-1.5 focus:outline-none" placeholder="บันทึกวันนี้: ได้ทำสัญญากับพ่อค้าลึกลับในวิหารรกร้าง..."></textarea>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block mb-0.5 text-[10px]">ไทม์ไลน์เหตุการณ์สำคัญ (Timeline):</span>
+                            <textarea id="campaign-timeline" rows="2" class="w-full bg-gray-900 border border-gray-800 text-white rounded p-1.5 focus:outline-none" placeholder="ปี 102: วิหารสุริยุปราคาล่มสลาย&#10;ปี 105: มังกรไฟตื่นขึ้น..."></textarea>
+                        </div>
+                        <button onclick="saveCampaignState()" class="w-full bg-amber-600 hover:bg-amber-700 text-black font-bold py-1 rounded transition">บันทึกประวัติแคมเปญลงคลาวด์</button>
+                    </div>
+                </div>
+
+                <!-- ================= TAB 4: MAGIC & SPELLS ================= -->
+                <div id="tab-panel-magic" class="hidden space-y-3">
+                    <div class="bg-gray-950 p-3 rounded-xl border border-gray-800/80 space-y-2.5 text-[11px]">
+                        <h3 class="font-bold text-purple-400 border-b border-gray-800 pb-1 flex justify-between items-center text-xs">
+                            <span>🧙 คลังเวทมนตร์และช่องร่าย (Spell Slots)</span>
+                        </h3>
+                        
+                        <!-- SPELL SLOTS TRACKER -->
+                        <div class="grid grid-cols-4 gap-1 text-center font-mono text-[9px]">
+                            <div class="bg-gray-900 p-1 rounded border border-gray-800"><span>1st Level</span><input id="slot-lvl1" type="number" value="3" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded border border-gray-800"><span>2nd Level</span><input id="slot-lvl2" type="number" value="2" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded border border-gray-800"><span>3rd Level</span><input id="slot-lvl3" type="number" value="1" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                            <div class="bg-gray-900 p-1 rounded border border-gray-800"><span>4th Level</span><input id="slot-lvl4" type="number" value="0" class="w-full bg-black text-center text-white rounded font-bold"></div>
+                        </div>
+
+                        <!-- SPELL PREPARATION LIST -->
+                        <div>
+                            <span class="text-gray-400 font-bold block mb-1">เตรียมเวทมนตร์พร้อมร่าย (Prepared Spells):</span>
+                            <textarea id="char-prepared-spells" rows="3" class="w-full bg-gray-900 border border-gray-800 text-white rounded p-1.5 focus:outline-none" placeholder="1. Fireball (3rd Lvl) - ดาเมจ 8d6&#10;2. Cure Wounds (1st Lvl) - ฮีลฟื้นฟูเลือด 1d8 + Mod"></textarea>
+                        </div>
+                        <button onclick="rollSpellCast()" class="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-1.5 rounded transition">⚡ ร่ายเวทมนตร์และตัดแต้ม Spell Slot</button>
+                    </div>
+                </div>
+
+                <!-- ================= TAB 5: OFFLINE DATABASE & AI GENERATOR ================= -->
+                <div id="tab-panel-database" class="hidden space-y-3">
+                    <div class="bg-gray-950 p-3 rounded-xl border border-gray-800/80 space-y-2.5 text-[11px]">
+                        <h3 class="font-bold text-amber-500 border-b border-gray-800 pb-1 flex justify-between items-center text-xs">
+                            <span>📚 คลังข้อมูลสำเร็จรูป & AI Co-Writer</span>
+                        </h3>
+                        
+                        <!-- INTERNAL GAME DATABASES -->
+                        <div class="space-y-1.5">
+                            <span class="text-gray-400 font-bold block text-[10px]">ค้นหาคลังประวัติ/ข้อมูลความสามารถ:</span>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <select id="db-spell-select" onchange="lookupSpellDatabase(this.value)" class="bg-gray-900 border border-gray-700 text-white p-1 rounded text-[10px] w-full">
+                                    <option value="">-- ค้นหาคาถา 🪄 --</option>
+                                    <option value="magic-missile">Magic Missile</option>
+                                    <option value="fireball">Fireball</option>
+                                    <option value="cure-wounds">Cure Wounds</option>
+                                </select>
+                                <select id="db-item-select" onchange="lookupItemDatabase(this.value)" class="bg-gray-900 border border-gray-700 text-white p-1 rounded text-[10px] w-full">
+                                    <option value="">-- ค้นหาไอเทม 🗡️ --</option>
+                                    <option value="longsword">Longsword</option>
+                                    <option value="leather-armor">Leather Armor</option>
+                                    <option value="potion-healing">Potion of Healing</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- AI GENERATION TOOLS (GEMINI 2.5/3.1) -->
+                        <div class="border-t border-gray-800 pt-2 space-y-2">
+                            <span class="text-amber-500 font-bold block text-[10px]">🤖 ฟีเจอร์ AI พลังสมองช่วยรังสรรค์เรื่องราว:</span>
+                            <textarea id="ai-prompt" rows="2" class="w-full bg-gray-900 border border-gray-850 text-white rounded p-1.5 focus:outline-none" placeholder="ป้อนความต้องการ: เช่น ขอสัญญาร้านเหล้าสุดลึกลับ / ปีศาจหุบเขาที่น่ากลัว..."></textarea>
+                            <div class="grid grid-cols-2 gap-1 text-[10px]">
+                                <button onclick="generateAIContent('npc')" class="bg-amber-950/40 hover:bg-amber-900 border border-amber-800 text-amber-200 py-1 rounded font-bold">สร้าง NPC 🧑</button>
+                                <button onclick="generateAIContent('quest')" class="bg-amber-950/40 hover:bg-amber-900 border border-amber-800 text-amber-200 py-1 rounded font-bold">สร้างพล็อตเควสต์ 🗺️</button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1 text-[10px]">
+                                <button onclick="generateAIContent('dungeon')" class="bg-amber-950/40 hover:bg-amber-900 border border-amber-800 text-amber-200 py-1 rounded font-bold">สร้างแผนผังดันเจียน 🏰</button>
+                                <button onclick="generateAIPortrait()" id="btn-portrait-ai" class="bg-purple-950/40 hover:bg-purple-900 border border-purple-800 text-purple-200 py-1 rounded font-bold">วาดภาพตัวละคร AI 🎨</button>
+                            </div>
+                        </div>
+
+                        <!-- DISPLAY MODULES -->
+                        <div id="ai-output-box" class="bg-black/80 p-2.5 rounded border border-gray-850 hidden max-h-48 overflow-y-auto text-xs">
+                            <span class="text-amber-500 font-bold block border-b border-gray-800 pb-0.5 mb-1">ผลลัพธ์จาก AI:</span>
+                            <div id="ai-output-text" class="text-gray-300 whitespace-pre-wrap leading-relaxed"></div>
+                        </div>
+                        <div id="ai-portrait-box" class="bg-black/80 p-2 rounded border border-gray-850 hidden flex flex-col items-center">
+                            <span class="text-purple-400 font-bold block mb-1">ภาพวาดตัวละครที่สังเคราะห์สำเร็จ:</span>
+                            <img id="ai-portrait-img" src="" class="max-w-full h-auto rounded border border-gray-700 shadow" alt="Character Portrait" />
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- CENTER BATTLEMAP PANEL -->
+        <section class="flex-1 bg-neutral-950 p-4 flex flex-col justify-center items-center overflow-auto border-r border-gray-800 relative">
+            
+            <!-- TOOLBAR MODES Overlay -->
+            <div class="absolute top-3 left-4 flex gap-1.5 z-10">
+                <button onclick="toggleRuler()" id="btn-ruler" class="bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-400 px-2.5 py-1 rounded text-[10px] font-medium flex items-center gap-1"><i class="fa-solid fa-ruler"></i> ไม้บรรทัดวัดระยะ: OFF</button>
+                <button onclick="toggleFogTool()" id="btn-fog-tool" class="bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-400 px-2.5 py-1 rounded text-[10px] font-medium flex items-center gap-1"><i class="fa-solid fa-eye-slash"></i> โหมดพ่นหมอก: OFF</button>
+                <div id="ruler-result" class="hidden bg-amber-600 text-black font-bold text-[10px] px-2.5 rounded shadow flex items-center">-</div>
+            </div>
+
+            <!-- AUDIO & MAP CONFIGS -->
+            <div class="absolute top-3 right-4 flex gap-1.5 z-10">
+                <button id="btn-music-drone" onclick="toggleAmbientMusic()" class="bg-gray-900 hover:bg-gray-800 border border-gray-700 text-purple-400 px-2.5 py-1 rounded text-[10px] font-medium flex items-center gap-1"><i class="fa-solid fa-music"></i> ดนตรีดาร์กดันเจียน: OFF</button>
+                <div class="flex items-center gap-1 bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5">
+                    <span class="text-[9px] text-gray-500">URL ภาพแมพ:</span>
+                    <input type="text" id="map-bg-url" onchange="updateMapBackground()" placeholder="https://..." class="bg-black border border-gray-800 text-[10px] w-28 text-white px-1 focus:outline-none rounded">
+                </div>
+            </div>
+            
+            <div class="w-full max-w-[460px] aspect-square bg-[#111115] border-2 border-gray-800 rounded-xl overflow-hidden shadow-2xl relative" id="battle-map" style="background-image: linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.15)), url('https://placehold.co/600x600/121217/3c3321?text=Grand+Sovereign+VTT'); background-size: cover; background-position: center;">
+                <div class="grid grid-cols-8 grid-rows-8 h-full w-full absolute top-0 left-0" id="grid-container">
+                    <!-- Grid cells dynamically painted -->
+                </div>
+            </div>
+            
+            <span class="text-[10px] text-gray-500 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> ดับเบิ้ลคลิกหมากตัวละครเพื่อสลัดสีเหลืองส้มในการสวมความเสียหาย</span>
+        </section>
+
+        <!-- RIGHT ACTION CHAT PANEL -->
+        <section class="w-80 bg-gray-900/40 p-3 flex flex-col gap-3 shrink-0">
+            
+            <!-- DICE ROLLER HUB -->
+            <div class="bg-gray-950 p-3 rounded-xl border border-gray-850">
+                <h3 class="text-xs font-bold text-amber-500 mb-2 flex justify-between items-center">
+                    <span><i class="fa-solid fa-dice-d20 mr-1"></i> เครื่องทอยเต๋าผูกมิติดาเมจ (Dice Roller)</span>
+                </h3>
+                <div class="grid grid-cols-4 gap-1 mb-2 font-mono">
+                    <button onclick="triggerDiceRoll(4)" class="bg-gray-900 hover:bg-amber-950 p-1 text-[10px] rounded border border-gray-800 text-gray-300">d4</button>
+                    <button onclick="triggerDiceRoll(6)" class="bg-gray-900 hover:bg-amber-950 p-1 text-[10px] rounded border border-gray-800 text-gray-300">d6</button>
+                    <button onclick="triggerDiceRoll(8)" class="bg-gray-900 hover:bg-amber-950 p-1 text-[10px] rounded border border-gray-800 text-gray-300">d8</button>
+                    <button onclick="triggerDiceRoll(10)" class="bg-gray-900 hover:bg-amber-950 p-1 text-[10px] rounded border border-gray-800 text-gray-300">d10</button>
+                    <button onclick="triggerDiceRoll(12)" class="bg-gray-900 hover:bg-amber-950 p-1 text-[10px] rounded border border-gray-800 text-gray-300">d12</button>
+                    <button onclick="triggerDiceRoll(20)" class="bg-amber-600 text-black p-1 text-[10px] rounded border border-amber-500 font-bold col-span-2">d20 (ทอยหลัก)</button>
+                    <button onclick="triggerDiceRoll(100)" class="bg-gray-900 hover:bg-amber-950 p-1 text-[10px] rounded border border-gray-800 text-gray-300">d100</button>
+                </div>
+                <div class="grid grid-cols-2 gap-1 mb-2">
+                    <button onclick="triggerDiceRoll(20, 'adv')" class="bg-gray-900 hover:bg-gray-800 text-[10px] text-green-400 py-1 border border-gray-800 rounded font-bold">ได้เปรียบ (Adv)</button>
+                    <button onclick="triggerDiceRoll(20, 'disadv')" class="bg-gray-900 hover:bg-gray-800 text-[10px] text-red-400 py-1 border border-gray-800 rounded font-bold">เสียเปรียบ (Dis)</button>
+                </div>
+                
+                <div class="bg-black/70 rounded p-2 border border-gray-800 flex justify-between items-center shadow-inner font-mono">
+                    <div>
+                        <div id="panel-dice-formula" class="text-[10px] text-gray-500">พร้อมรับคำสั่งเต๋าลิขิต</div>
+                        <div id="panel-dice-breakdown" class="text-[9px] text-gray-400 mt-0.5">-</div>
+                    </div>
+                    <div id="panel-dice-total" class="text-2xl font-black text-amber-400 px-1">-</div>
+                </div>
+            </div>
+
+            <!-- CHAT FEED -->
+            <div class="flex-1 bg-gray-950 rounded-xl border border-gray-850 flex flex-col overflow-hidden shadow-sm">
+                <div class="bg-gray-900/80 px-3 py-1.5 border-b border-gray-800 flex items-center gap-1.5 shrink-0">
+                    <i class="fa-solid fa-scroll text-gray-400 text-[10px]"></i>
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">บันทึกประวัติการเดินแผนผัง (Combat Log)</span>
+                </div>
+                <div id="chat-messages" class="flex-1 p-2.5 overflow-y-auto space-y-2 text-[11px]">
+                    <div class="text-gray-500 italic">บอร์ดสำรองพร้อมเชื่อมคลาวด์ โปรดสร้างห้องออนไลน์...</div>
+                </div>
+                <form id="chat-form" class="p-1.5 border-t border-gray-800 bg-gray-900/80 flex gap-1 shrink-0" onsubmit="sendChatMessage(event)">
+                    <input type="text" id="chat-input" placeholder="พิมพ์ข้อความคุยในปาร์ตี้..." autocomplete="off" class="flex-1 bg-black border border-gray-800 text-xs text-white rounded p-1.5 focus:outline-none" />
+                    <button type="submit" class="bg-amber-600 text-black px-3 rounded text-xs"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // GAME STATE VARIABLES
+        let activeRoomId = "";
+        let unsubscribeRoom = null;
+        let isHost = false;
+        let username = "จอมเวทย์";
+        let userColor = "#3b82f6";
+        let tokensOnMap = {};
+        let fogState = {};
+
+        let characterLevel = 1;
+        let selectedTokenIdForDamage = null;
+        let rulerActive = false;
+        let rulerStartCell = null;
+        let fogToolActive = false;
+
+        // Built-in Static Catalogs (Database System)
+        const SPELL_DB = {
+            "magic-missile": { name: "Magic Missile", slot: "1st Level", desc: "สร้างศรมนตรา 3 ลูก โจมตีโดนอัตโนมัติลูกละ 1d4 + 1 ดาเมจพลังจิต" },
+            "fireball": { name: "Fireball", slot: "3rd Level", desc: "ร่ายลูกไฟระเบิดสร้างแรงกระแทกความร้อนดาเมจไฟขนาด 8d6 ล้างห้องศัตรู" },
+            "cure-wounds": { name: "Cure Wounds", slot: "1st Level", desc: "สัมผัสสิ่งมีชีวิตเพื่อใช้เวทย์รักษารักษาฟื้นฟูเลือด 1d8 + ตัวคูณคุณสมบัติ" }
+        };
+
+        const ITEM_DB = {
+            "longsword": { name: "Longsword", weight: 3, desc: "ดาบสองคมทรงพลังแบบคลาสสิก ดาเมจ 1d8 ฟันสองมือ (Versatile 1d10)" },
+            "leather-armor": { name: "Leather Armor", weight: 10, desc: "เกราะหนังน้ำหนักเบาช่วยเสริมการป้องกันโดยอิงโบนัสความคล่องตัว" },
+            "potion-healing": { name: "Potion of Healing", weight: 0.5, desc: "ขวดน้ำยาสีแดงสด ดื่มเพื่อฮีลเลือดคืนชีวิตทันที 2d4 + 2 HP" }
+        };
+
+        // UI TAB SWITCHER
+        window.switchTab = function(tabName) {
+            const tabs = ['character', 'combat', 'campaign', 'magic', 'database'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tab-btn-${t}`);
+                const panel = document.getElementById(`tab-panel-${t}`);
+                if (t === tabName) {
+                    btn.className = "py-2.5 text-amber-500 border-b-2 border-amber-500 bg-gray-900/40 flex flex-col items-center gap-1";
+                    panel.classList.remove('hidden');
+                } else {
+                    btn.className = "py-2.5 text-gray-400 hover:text-white flex flex-col items-center gap-1";
+                    panel.classList.add('hidden');
+                }
+            });
+        };
+
+        // Viewport and dynamic canvas resizing
+        window.addEventListener('resize', () => {
+            // Keep container square and correct proportion
+        });
+
+        // TOAST NOTIFICATIONS (No standard alert popup window)
+        function showNotification(title, message, type = "success") {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `p-3 rounded-lg shadow-xl border text-xs font-bold flex flex-col gap-1 transition duration-300 transform translate-x-4 pointer-events-auto w-64 ${
+                type === 'error' ? 'bg-red-950 border-red-700 text-red-200' : 'bg-gray-950 border-amber-500 text-amber-400'
+            }`;
+            toast.innerHTML = `<div>🛡️ ${title}</div><div class="text-gray-300 font-normal">${message}</div>`;
+            container.appendChild(toast);
+            setTimeout(() => { toast.classList.remove('translate-x-4'); }, 50);
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-x-4');
+                setTimeout(() => { toast.remove(); }, 300);
+            }, 4000);
+        }
+
+        // AMBIENT SOUND GENERATOR (Web Audio API Synthesizer)
+        let audioCtx = null;
+        let ambientOsc = null;
+        let ambientFilter = null;
+        let windNoiseNode = null;
+        let isAmbientMusicPlaying = false;
+
+        function toggleAmbientMusic() {
+            if (isAmbientMusicPlaying) {
+                stopAmbientMusic();
+            } else {
+                startAmbientMusic();
+            }
+        }
+
+        function startAmbientMusic() {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Spooky dungeon drone
+                ambientOsc = audioCtx.createOscillator();
+                ambientFilter = audioCtx.createBiquadFilter();
+                
+                ambientOsc.type = 'sawtooth';
+                ambientOsc.frequency.setValueAtTime(55, audioCtx.currentTime); // Low A bass frequency
+                
+                ambientFilter.type = 'lowpass';
+                ambientFilter.frequency.setValueAtTime(120, audioCtx.currentTime);
+                ambientFilter.Q.setValueAtTime(8, audioCtx.currentTime);
+
+                // Wind generator (White noise filtered)
+                const bufferSize = audioCtx.sampleRate * 2;
+                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+                windNoiseNode = audioCtx.createBufferSource();
+                windNoiseNode.buffer = noiseBuffer;
+                windNoiseNode.loop = true;
+
+                const windFilter = audioCtx.createBiquadFilter();
+                windFilter.type = 'bandpass';
+                windFilter.frequency.setValueAtTime(300, audioCtx.currentTime);
+                windFilter.Q.setValueAtTime(1.5, audioCtx.currentTime);
+
+                const oscGain = audioCtx.createGain();
+                oscGain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+
+                const windGain = audioCtx.createGain();
+                windGain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+
+                // Connections
+                ambientOsc.connect(ambientFilter);
+                ambientFilter.connect(oscGain);
+                oscGain.connect(audioCtx.destination);
+
+                windNoiseNode.connect(windFilter);
+                windFilter.connect(windGain);
+                windGain.connect(audioCtx.destination);
+
+                ambientOsc.start();
+                windNoiseNode.start();
+
+                // Low-frequency modulation (Modulating filter for wind howling effect)
+                let modInterval = setInterval(() => {
+                    if (!isAmbientMusicPlaying) { clearInterval(modInterval); return; }
+                    let cut = 80 + Math.random() * 90;
+                    let windCut = 250 + Math.random() * 400;
+                    if(ambientFilter && audioCtx) {
+                        ambientFilter.frequency.exponentialRampToValueAtTime(cut, audioCtx.currentTime + 1.8);
+                        windFilter.frequency.exponentialRampToValueAtTime(windCut, audioCtx.currentTime + 1.8);
+                    }
+                }, 2000);
+
+                isAmbientMusicPlaying = true;
+                document.getElementById('btn-music-drone').className = "bg-purple-900 border border-purple-600 text-white px-2.5 py-1 rounded text-[10px] font-bold flex items-center gap-1";
+                document.getElementById('btn-music-drone').innerHTML = `<i class="fa-solid fa-music animate-spin"></i> ดนตรีดาร์กดันเจียน: ON`;
+                showNotification("AMBIENT AUDIO", "เปิดระบบเสียงดาร์กดันเจียนสังเคราะห์สดผ่าน Web Audio API แล้ว!");
+            } catch(e) {
+                showNotification("AUDIO ERROR", "ไม่สามารถเปิดระบบสังเคราะห์เสียงบนเบราว์เซอร์นี้ได้", "error");
+            }
+        }
+
+        function stopAmbientMusic() {
+            if (ambientOsc) { try { ambientOsc.stop(); } catch(e){} }
+            if (windNoiseNode) { try { windNoiseNode.stop(); } catch(e){} }
+            isAmbientMusicPlaying = false;
+            document.getElementById('btn-music-drone').className = "bg-gray-900 hover:bg-gray-800 border border-gray-700 text-purple-400 px-2.5 py-1 rounded text-[10px] font-medium flex items-center gap-1";
+            document.getElementById('btn-music-drone').innerHTML = `<i class="fa-solid fa-music"></i> ดนตรีดาร์กดันเจียน: OFF`;
+            showNotification("AMBIENT AUDIO", "ปิดเสียงบรรยากาศแล้ว");
+        }
+
+        // ==========================================
+        // FIREBASE MULTIPLAYER & REALTIME SYNC
+        // ==========================================
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'dnd-vtt-canvas';
+        const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+
+        // WEIGHT CALCULATOR
+        window.calculateTotalWeight = function() {
+            const g = parseFloat(document.getElementById('coin-gold').value) || 0;
+            const s = parseFloat(document.getElementById('coin-silver').value) || 0;
+            const c = parseFloat(document.getElementById('coin-copper').value) || 0;
+            // 50 coins = 1 lb in official D&D rules
+            const coinWeight = (g + s + c) / 50;
+            const itemWeight = 10.0; // Base inventory items weight factor
+            document.getElementById('char-weight').value = (coinWeight + itemWeight).toFixed(1);
+        };
+        calculateTotalWeight();
+
+        // DB LOOKUP SYSTEMS
+        window.lookupSpellDatabase = function(key) {
+            if(!key) return;
+            const s = SPELL_DB[key];
+            if(s) {
+                addNewLog("คลังคาถา 📖", `[${s.name}] คาถาระดับ: ${s.slot} | รายละเอียด: ${s.desc}`, "chat");
+            }
+        };
+
+        window.lookupItemDatabase = function(key) {
+            if(!key) return;
+            const i = ITEM_DB[key];
+            if(i) {
+                addNewLog("คลังไอเทม 🗡️", `[${i.name}] น้ำหนัก: ${i.weight} lb | รายละเอียด: ${i.desc}`, "chat");
+            }
+        };
+
+        // SWITCH FOG TOGGLE
+        window.toggleFogTool = function() {
+            if(!isHost) {
+                showNotification("สิทธิ์ผู้ถือห้อง", "เฉพาะ Host เท่านั้นที่ระบายหมอกได้!", "error");
+                return;
+            }
+            fogToolActive = !fogToolActive;
+            const btn = document.getElementById('btn-fog-tool');
+            if (fogToolActive) {
+                btn.className = "bg-red-900 border border-red-600 text-white px-2.5 py-1 rounded text-[10px] font-bold flex items-center gap-1";
+                btn.innerText = "โหมดพ่นหมอก: ON (คลิกแผนที่เพื่อลบ/พ่น)";
+            } else {
+                btn.className = "bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-400 px-2.5 py-1 rounded text-[10px] font-medium flex items-center gap-1";
+                btn.innerText = "โหมดพ่นหมอก: OFF";
+            }
+        };
+
+        // COPY ROOM ID
+        window.copyRoomID = function() {
+            const dummy = document.createElement("input");
+            document.body.appendChild(dummy);
+            dummy.value = activeRoomId;
+            dummy.select();
+            document.execCommand('copy');
+            document.body.removeChild(dummy);
+            showNotification("แชร์รหัสห้อง", "คัดลอก Room ID ใส่คลิปบอร์ดส่งต่อให้ปาร์ตี้ได้เลย!");
+        };
+    </script>
+</body>
+</html>
